@@ -10,18 +10,18 @@
 /* Telegram Bot */
 #define MIMI_TG_POLL_TIMEOUT_S       30
 #define MIMI_TG_MAX_MSG_LEN          4096
-#define MIMI_TG_POLL_STACK           (8 * 1024)
+#define MIMI_TG_POLL_STACK           (12 * 1024)
 #define MIMI_TG_POLL_PRIO            5
 #define MIMI_TG_POLL_CORE            0
 
 /* Agent Loop */
-#define MIMI_AGENT_STACK             (8 * 1024)
+#define MIMI_AGENT_STACK             (12 * 1024)
 #define MIMI_AGENT_PRIO              6
 #define MIMI_AGENT_CORE              1
 #define MIMI_AGENT_MAX_HISTORY       20
 
 /* LLM */
-#define MIMI_LLM_DEFAULT_MODEL       "claude-opus-4-5-20251101"
+#define MIMI_LLM_DEFAULT_MODEL       "claude-opus-4-6"
 #define MIMI_LLM_MAX_TOKENS          4096
 #define MIMI_LLM_API_URL             "https://api.anthropic.com/v1/messages"
 #define MIMI_LLM_API_VERSION         "2023-06-01"
@@ -29,7 +29,7 @@
 
 /* Message Bus */
 #define MIMI_BUS_QUEUE_LEN           8
-#define MIMI_OUTBOUND_STACK          (4 * 1024)
+#define MIMI_OUTBOUND_STACK          (8 * 1024)
 #define MIMI_OUTBOUND_PRIO           5
 #define MIMI_OUTBOUND_CORE           0
 
@@ -57,6 +57,7 @@
 #define MIMI_NVS_WIFI                "wifi_config"
 #define MIMI_NVS_TG                  "tg_config"
 #define MIMI_NVS_LLM                 "llm_config"
+#define MIMI_NVS_PROXY               "proxy_config"
 
 /* NVS Keys */
 #define MIMI_NVS_KEY_SSID            "ssid"
@@ -64,3 +65,5 @@
 #define MIMI_NVS_KEY_TG_TOKEN        "bot_token"
 #define MIMI_NVS_KEY_API_KEY         "api_key"
 #define MIMI_NVS_KEY_MODEL           "model"
+#define MIMI_NVS_KEY_PROXY_HOST      "host"
+#define MIMI_NVS_KEY_PROXY_PORT      "port"

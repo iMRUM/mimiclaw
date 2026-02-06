@@ -19,6 +19,7 @@
 #include "memory/session_mgr.h"
 #include "gateway/ws_server.h"
 #include "cli/serial_cli.h"
+#include "proxy/http_proxy.h"
 
 static const char *TAG = "mimi";
 
@@ -100,6 +101,7 @@ void app_main(void)
     ESP_ERROR_CHECK(memory_store_init());
     ESP_ERROR_CHECK(session_mgr_init());
     ESP_ERROR_CHECK(wifi_manager_init());
+    ESP_ERROR_CHECK(http_proxy_init());
     ESP_ERROR_CHECK(telegram_bot_init());
     ESP_ERROR_CHECK(llm_proxy_init());
     ESP_ERROR_CHECK(agent_loop_init());

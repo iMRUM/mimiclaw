@@ -12,6 +12,7 @@ idf_component_register(
         "gateway/ws_server.c"
         "cli/serial_cli.c"
         "ota/ota_manager.c"
+        "proxy/http_proxy.c"
     INCLUDE_DIRS
         "."
     REQUIRES

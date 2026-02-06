@@ -1,5 +1,6 @@
 #include "llm_proxy.h"
 #include "mimi_config.h"
+#include "proxy/http_proxy.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -131,6 +132,110 @@ esp_err_t llm_proxy_init(void)
     return ESP_OK;
 }
 
+/* ── Direct path: esp_http_client ───────────────────────────── */
+
+static esp_err_t llm_chat_direct(const char *post_data, sse_ctx_t *ctx, int *out_status)
+{
+    esp_http_client_config_t config = {
+        .url = MIMI_LLM_API_URL,
+        .event_handler = http_event_handler,
+        .user_data = ctx,
+        .timeout_ms = 120 * 1000,
+        .buffer_size = 4096,
+        .buffer_size_tx = 4096,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (!client) return ESP_FAIL;
+
+    esp_http_client_set_method(client, HTTP_METHOD_POST);
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_header(client, "x-api-key", s_api_key);
+    esp_http_client_set_header(client, "anthropic-version", MIMI_LLM_API_VERSION);
+    esp_http_client_set_post_field(client, post_data, strlen(post_data));
+
+    esp_err_t err = esp_http_client_perform(client);
+    *out_status = esp_http_client_get_status_code(client);
+    esp_http_client_cleanup(client);
+    return err;
+}
+
+/* ── Proxy path: manual HTTP over CONNECT tunnel ────────────── */
+
+static esp_err_t llm_chat_via_proxy(const char *post_data, sse_ctx_t *ctx, int *out_status)
+{
+    proxy_conn_t *conn = proxy_conn_open("api.anthropic.com", 443, 30000);
+    if (!conn) return ESP_ERR_HTTP_CONNECT;
+
+    /* Build HTTP request */
+    int body_len = strlen(post_data);
+    char header[512];
+    int hlen = snprintf(header, sizeof(header),
+        "POST /v1/messages HTTP/1.1\r\n"
+        "Host: api.anthropic.com\r\n"
+        "Content-Type: application/json\r\n"
+        "x-api-key: %s\r\n"
+        "anthropic-version: %s\r\n"
+        "Content-Length: %d\r\n"
+        "Connection: close\r\n\r\n",
+        s_api_key, MIMI_LLM_API_VERSION, body_len);
+
+    if (proxy_conn_write(conn, header, hlen) < 0 ||
+        proxy_conn_write(conn, post_data, body_len) < 0) {
+        proxy_conn_close(conn);
+        return ESP_ERR_HTTP_WRITE_DATA;
+    }
+
+    /* Read response — first line is status */
+    size_t raw_len = 0;
+    size_t raw_cap = 32768;
+    char *raw = calloc(1, raw_cap);
+    if (!raw) { proxy_conn_close(conn); return ESP_ERR_NO_MEM; }
+
+    while (1) {
+        if (raw_len + 4096 >= raw_cap) {
+            raw_cap *= 2;
+            char *tmp = realloc(raw, raw_cap);
+            if (!tmp) break;
+            raw = tmp;
+        }
+        int n = proxy_conn_read(conn, raw + raw_len, 4096, 120000);
+        if (n <= 0) break;
+        raw_len += n;
+    }
+    raw[raw_len] = '\0';
+    proxy_conn_close(conn);
+
+    /* Parse status line */
+    *out_status = 0;
+    if (strncmp(raw, "HTTP/", 5) == 0) {
+        const char *sp = strchr(raw, ' ');
+        if (sp) *out_status = atoi(sp + 1);
+    }
+
+    /* Find body after \r\n\r\n */
+    char *body = strstr(raw, "\r\n\r\n");
+    if (body) {
+        body += 4;
+        size_t body_len = raw_len - (body - raw);
+        if (*out_status == 200) {
+            /* Feed body to SSE parser */
+            sse_feed(ctx, body, body_len);
+        } else {
+            /* For error responses, capture raw body */
+            size_t copy_len = body_len < ctx->resp_cap - 1 ? body_len : ctx->resp_cap - 1;
+            memcpy(ctx->response, body, copy_len);
+            ctx->response[copy_len] = '\0';
+            ctx->resp_len = copy_len;
+            ESP_LOGE(TAG, "API error body: %.500s", body);
+        }
+    }
+
+    free(raw);
+    return ESP_OK;
+}
+
 esp_err_t llm_chat(const char *system_prompt, const char *messages_json,
                    char *response_buf, size_t buf_size)
 {
@@ -182,33 +287,14 @@ esp_err_t llm_chat(const char *system_prompt, const char *messages_json,
         return ESP_ERR_NO_MEM;
     }
 
-    esp_http_client_config_t config = {
-        .url = MIMI_LLM_API_URL,
-        .event_handler = http_event_handler,
-        .user_data = &ctx,
-        .timeout_ms = 120 * 1000,   /* 2 min timeout for long responses */
-        .buffer_size = 4096,
-        .buffer_size_tx = 4096,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-    };
+    esp_err_t err;
+    int status = 0;
 
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (!client) {
-        free(post_data);
-        free(ctx.response);
-        snprintf(response_buf, buf_size, "Error: HTTP client init failed");
-        return ESP_FAIL;
+    if (http_proxy_is_enabled()) {
+        err = llm_chat_via_proxy(post_data, &ctx, &status);
+    } else {
+        err = llm_chat_direct(post_data, &ctx, &status);
     }
-
-    esp_http_client_set_method(client, HTTP_METHOD_POST);
-    esp_http_client_set_header(client, "Content-Type", "application/json");
-    esp_http_client_set_header(client, "x-api-key", s_api_key);
-    esp_http_client_set_header(client, "anthropic-version", MIMI_LLM_API_VERSION);
-    esp_http_client_set_post_field(client, post_data, strlen(post_data));
-
-    esp_err_t err = esp_http_client_perform(client);
-    int status = esp_http_client_get_status_code(client);
-    esp_http_client_cleanup(client);
     free(post_data);
 
     if (err != ESP_OK) {
@@ -221,7 +307,6 @@ esp_err_t llm_chat(const char *system_prompt, const char *messages_json,
     if (status != 200) {
         ESP_LOGE(TAG, "API returned status %d", status);
         if (ctx.resp_len > 0) {
-            /* Response might contain error info */
             snprintf(response_buf, buf_size, "API error (HTTP %d): %.200s", status, ctx.response);
         } else {
             snprintf(response_buf, buf_size, "API error (HTTP %d)", status);

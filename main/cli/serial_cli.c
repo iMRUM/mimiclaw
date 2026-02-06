@@ -5,6 +5,7 @@
 #include "llm/llm_proxy.h"
 #include "memory/memory_store.h"
 #include "memory/session_mgr.h"
+#include "proxy/http_proxy.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -169,6 +170,33 @@ static int cmd_heap_info(int argc, char **argv)
     return 0;
 }
 
+/* --- set_proxy command --- */
+static struct {
+    struct arg_str *host;
+    struct arg_int *port;
+    struct arg_end *end;
+} proxy_args;
+
+static int cmd_set_proxy(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&proxy_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, proxy_args.end, argv[0]);
+        return 1;
+    }
+    http_proxy_set(proxy_args.host->sval[0], (uint16_t)proxy_args.port->ival[0]);
+    printf("Proxy set. Restart to apply.\n");
+    return 0;
+}
+
+/* --- clear_proxy command --- */
+static int cmd_clear_proxy(int argc, char **argv)
+{
+    http_proxy_clear();
+    printf("Proxy cleared. Restart to apply.\n");
+    return 0;
+}
+
 /* --- restart command --- */
 static int cmd_restart(int argc, char **argv)
 {
@@ -290,6 +318,26 @@ esp_err_t serial_cli_init(void)
         .func = &cmd_heap_info,
     };
     esp_console_cmd_register(&heap_cmd);
+
+    /* set_proxy */
+    proxy_args.host = arg_str1(NULL, NULL, "<host>", "Proxy host/IP");
+    proxy_args.port = arg_int1(NULL, NULL, "<port>", "Proxy port");
+    proxy_args.end = arg_end(2);
+    esp_console_cmd_t proxy_cmd = {
+        .command = "set_proxy",
+        .help = "Set HTTP proxy (e.g. set_proxy 192.168.1.83 7897)",
+        .func = &cmd_set_proxy,
+        .argtable = &proxy_args,
+    };
+    esp_console_cmd_register(&proxy_cmd);
+
+    /* clear_proxy */
+    esp_console_cmd_t clear_proxy_cmd = {
+        .command = "clear_proxy",
+        .help = "Remove proxy configuration",
+        .func = &cmd_clear_proxy,
+    };
+    esp_console_cmd_register(&clear_proxy_cmd);
 
     /* restart */
     esp_console_cmd_t restart_cmd = {

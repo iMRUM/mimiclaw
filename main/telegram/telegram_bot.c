@@ -1,6 +1,7 @@
 #include "telegram_bot.h"
 #include "mimi_config.h"
 #include "bus/message_bus.h"
+#include "proxy/http_proxy.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -43,7 +44,76 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
     return ESP_OK;
 }
 
-static char *tg_api_call(const char *method, const char *post_data)
+/* ── Proxy path: manual HTTP over CONNECT tunnel ────────────── */
+
+static char *tg_api_call_via_proxy(const char *path, const char *post_data)
+{
+    proxy_conn_t *conn = proxy_conn_open("api.telegram.org", 443,
+                                          (MIMI_TG_POLL_TIMEOUT_S + 5) * 1000);
+    if (!conn) return NULL;
+
+    /* Build HTTP request */
+    char header[512];
+    int hlen;
+    if (post_data) {
+        hlen = snprintf(header, sizeof(header),
+            "POST /bot%s/%s HTTP/1.1\r\n"
+            "Host: api.telegram.org\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Length: %d\r\n"
+            "Connection: close\r\n\r\n",
+            s_bot_token, path, (int)strlen(post_data));
+    } else {
+        hlen = snprintf(header, sizeof(header),
+            "GET /bot%s/%s HTTP/1.1\r\n"
+            "Host: api.telegram.org\r\n"
+            "Connection: close\r\n\r\n",
+            s_bot_token, path);
+    }
+
+    if (proxy_conn_write(conn, header, hlen) < 0) {
+        proxy_conn_close(conn);
+        return NULL;
+    }
+    if (post_data && proxy_conn_write(conn, post_data, strlen(post_data)) < 0) {
+        proxy_conn_close(conn);
+        return NULL;
+    }
+
+    /* Read response — accumulate until connection close */
+    size_t cap = 4096, len = 0;
+    char *buf = calloc(1, cap);
+    if (!buf) { proxy_conn_close(conn); return NULL; }
+
+    int timeout = (MIMI_TG_POLL_TIMEOUT_S + 5) * 1000;
+    while (1) {
+        if (len + 1024 >= cap) {
+            cap *= 2;
+            char *tmp = realloc(buf, cap);
+            if (!tmp) break;
+            buf = tmp;
+        }
+        int n = proxy_conn_read(conn, buf + len, cap - len - 1, timeout);
+        if (n <= 0) break;
+        len += n;
+    }
+    buf[len] = '\0';
+    proxy_conn_close(conn);
+
+    /* Skip HTTP headers — find \r\n\r\n */
+    char *body = strstr(buf, "\r\n\r\n");
+    if (!body) { free(buf); return NULL; }
+    body += 4;
+
+    /* Return just the body */
+    char *result = strdup(body);
+    free(buf);
+    return result;
+}
+
+/* ── Direct path: esp_http_client ───────────────────────────── */
+
+static char *tg_api_call_direct(const char *method, const char *post_data)
 {
     char url[256];
     snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/%s", s_bot_token, method);
@@ -87,6 +157,14 @@ static char *tg_api_call(const char *method, const char *post_data)
     }
 
     return resp.buf;
+}
+
+static char *tg_api_call(const char *method, const char *post_data)
+{
+    if (http_proxy_is_enabled()) {
+        return tg_api_call_via_proxy(method, post_data);
+    }
+    return tg_api_call_direct(method, post_data);
 }
 
 static void process_updates(const char *json_str)
