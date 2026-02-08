@@ -8,6 +8,7 @@
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
+#include "nvs.h"
 #include "cJSON.h"
 
 static const char *TAG = "web_search";
@@ -43,14 +44,26 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 
 esp_err_t tool_web_search_init(void)
 {
+    /* Start with build-time default */
     if (MIMI_SECRET_SEARCH_KEY[0] != '\0') {
         strncpy(s_search_key, MIMI_SECRET_SEARCH_KEY, sizeof(s_search_key) - 1);
+    }
+
+    /* NVS overrides take highest priority (set via CLI) */
+    nvs_handle_t nvs;
+    if (nvs_open(MIMI_NVS_SEARCH, NVS_READONLY, &nvs) == ESP_OK) {
+        char tmp[128] = {0};
+        size_t len = sizeof(tmp);
+        if (nvs_get_str(nvs, MIMI_NVS_KEY_API_KEY, tmp, &len) == ESP_OK && tmp[0]) {
+            strncpy(s_search_key, tmp, sizeof(s_search_key) - 1);
+        }
+        nvs_close(nvs);
     }
 
     if (s_search_key[0]) {
         ESP_LOGI(TAG, "Web search initialized (key configured)");
     } else {
-        ESP_LOGW(TAG, "No search API key. Set MIMI_SECRET_SEARCH_KEY in mimi_secrets.h");
+        ESP_LOGW(TAG, "No search API key. Use CLI: set_search_key <KEY>");
     }
     return ESP_OK;
 }
@@ -281,5 +294,18 @@ esp_err_t tool_web_search_execute(const char *input_json, char *output, size_t o
     cJSON_Delete(root);
 
     ESP_LOGI(TAG, "Search complete, %d bytes result", (int)strlen(output));
+    return ESP_OK;
+}
+
+esp_err_t tool_web_search_set_key(const char *api_key)
+{
+    nvs_handle_t nvs;
+    ESP_ERROR_CHECK(nvs_open(MIMI_NVS_SEARCH, NVS_READWRITE, &nvs));
+    ESP_ERROR_CHECK(nvs_set_str(nvs, MIMI_NVS_KEY_API_KEY, api_key));
+    ESP_ERROR_CHECK(nvs_commit(nvs));
+    nvs_close(nvs);
+
+    strncpy(s_search_key, api_key, sizeof(s_search_key) - 1);
+    ESP_LOGI(TAG, "Search API key saved");
     return ESP_OK;
 }

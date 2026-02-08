@@ -8,9 +8,19 @@
 #include "mimi_config.h"
 
 /**
- * Initialize the LLM proxy.
+ * Initialize the LLM proxy. Reads API key and model from build-time secrets, then NVS.
  */
 esp_err_t llm_proxy_init(void);
+
+/**
+ * Save the Anthropic API key to NVS.
+ */
+esp_err_t llm_set_api_key(const char *api_key);
+
+/**
+ * Save the model identifier to NVS.
+ */
+esp_err_t llm_set_model(const char *model);
 
 /**
  * Send a chat completion request to Anthropic Messages API (streaming).

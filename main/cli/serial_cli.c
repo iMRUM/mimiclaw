@@ -1,8 +1,12 @@
 #include "serial_cli.h"
 #include "mimi_config.h"
 #include "wifi/wifi_manager.h"
+#include "telegram/telegram_bot.h"
+#include "llm/llm_proxy.h"
 #include "memory/memory_store.h"
 #include "memory/session_mgr.h"
+#include "proxy/http_proxy.h"
+#include "tools/tool_web_search.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -10,15 +14,91 @@
 #include "esp_console.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 #include "argtable3/argtable3.h"
 
 static const char *TAG = "cli";
+
+/* --- wifi_set command --- */
+static struct {
+    struct arg_str *ssid;
+    struct arg_str *password;
+    struct arg_end *end;
+} wifi_set_args;
+
+static int cmd_wifi_set(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&wifi_set_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, wifi_set_args.end, argv[0]);
+        return 1;
+    }
+    wifi_manager_set_credentials(wifi_set_args.ssid->sval[0],
+                                  wifi_set_args.password->sval[0]);
+    printf("WiFi credentials saved. Restart to apply.\n");
+    return 0;
+}
 
 /* --- wifi_status command --- */
 static int cmd_wifi_status(int argc, char **argv)
 {
     printf("WiFi connected: %s\n", wifi_manager_is_connected() ? "yes" : "no");
     printf("IP: %s\n", wifi_manager_get_ip());
+    return 0;
+}
+
+/* --- set_tg_token command --- */
+static struct {
+    struct arg_str *token;
+    struct arg_end *end;
+} tg_token_args;
+
+static int cmd_set_tg_token(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&tg_token_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, tg_token_args.end, argv[0]);
+        return 1;
+    }
+    telegram_set_token(tg_token_args.token->sval[0]);
+    printf("Telegram bot token saved.\n");
+    return 0;
+}
+
+/* --- set_api_key command --- */
+static struct {
+    struct arg_str *key;
+    struct arg_end *end;
+} api_key_args;
+
+static int cmd_set_api_key(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&api_key_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, api_key_args.end, argv[0]);
+        return 1;
+    }
+    llm_set_api_key(api_key_args.key->sval[0]);
+    printf("API key saved.\n");
+    return 0;
+}
+
+/* --- set_model command --- */
+static struct {
+    struct arg_str *model;
+    struct arg_end *end;
+} model_args;
+
+static int cmd_set_model(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&model_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, model_args.end, argv[0]);
+        return 1;
+    }
+    llm_set_model(model_args.model->sval[0]);
+    printf("Model set.\n");
     return 0;
 }
 
@@ -98,6 +178,116 @@ static int cmd_heap_info(int argc, char **argv)
     return 0;
 }
 
+/* --- set_proxy command --- */
+static struct {
+    struct arg_str *host;
+    struct arg_int *port;
+    struct arg_end *end;
+} proxy_args;
+
+static int cmd_set_proxy(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&proxy_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, proxy_args.end, argv[0]);
+        return 1;
+    }
+    http_proxy_set(proxy_args.host->sval[0], (uint16_t)proxy_args.port->ival[0]);
+    printf("Proxy set. Restart to apply.\n");
+    return 0;
+}
+
+/* --- clear_proxy command --- */
+static int cmd_clear_proxy(int argc, char **argv)
+{
+    http_proxy_clear();
+    printf("Proxy cleared. Restart to apply.\n");
+    return 0;
+}
+
+/* --- set_search_key command --- */
+static struct {
+    struct arg_str *key;
+    struct arg_end *end;
+} search_key_args;
+
+static int cmd_set_search_key(int argc, char **argv)
+{
+    int nerrors = arg_parse(argc, argv, (void **)&search_key_args);
+    if (nerrors != 0) {
+        arg_print_errors(stderr, search_key_args.end, argv[0]);
+        return 1;
+    }
+    tool_web_search_set_key(search_key_args.key->sval[0]);
+    printf("Search API key saved.\n");
+    return 0;
+}
+
+/* --- config_show command --- */
+static void print_config(const char *label, const char *ns, const char *key,
+                         const char *build_val, bool mask)
+{
+    char nvs_val[128] = {0};
+    const char *source = "not set";
+    const char *display = "(empty)";
+
+    /* NVS takes highest priority */
+    nvs_handle_t nvs;
+    if (nvs_open(ns, NVS_READONLY, &nvs) == ESP_OK) {
+        size_t len = sizeof(nvs_val);
+        if (nvs_get_str(nvs, key, nvs_val, &len) == ESP_OK && nvs_val[0]) {
+            source = "NVS";
+            display = nvs_val;
+        }
+        nvs_close(nvs);
+    }
+
+    /* Fall back to build-time value */
+    if (strcmp(source, "not set") == 0 && build_val[0] != '\0') {
+        source = "build";
+        display = build_val;
+    }
+
+    if (mask && strlen(display) > 6 && strcmp(display, "(empty)") != 0) {
+        printf("  %-14s: %.4s****  [%s]\n", label, display, source);
+    } else {
+        printf("  %-14s: %s  [%s]\n", label, display, source);
+    }
+}
+
+static int cmd_config_show(int argc, char **argv)
+{
+    printf("=== Current Configuration ===\n");
+    print_config("WiFi SSID",  MIMI_NVS_WIFI,   MIMI_NVS_KEY_SSID,     MIMI_SECRET_WIFI_SSID,  false);
+    print_config("WiFi Pass",  MIMI_NVS_WIFI,   MIMI_NVS_KEY_PASS,     MIMI_SECRET_WIFI_PASS,  true);
+    print_config("TG Token",   MIMI_NVS_TG,     MIMI_NVS_KEY_TG_TOKEN, MIMI_SECRET_TG_TOKEN,   true);
+    print_config("API Key",    MIMI_NVS_LLM,    MIMI_NVS_KEY_API_KEY,  MIMI_SECRET_API_KEY,    true);
+    print_config("Model",      MIMI_NVS_LLM,    MIMI_NVS_KEY_MODEL,    MIMI_SECRET_MODEL,      false);
+    print_config("Proxy Host", MIMI_NVS_PROXY,  MIMI_NVS_KEY_PROXY_HOST, MIMI_SECRET_PROXY_HOST, false);
+    print_config("Proxy Port", MIMI_NVS_PROXY,  MIMI_NVS_KEY_PROXY_PORT, MIMI_SECRET_PROXY_PORT, false);
+    print_config("Search Key", MIMI_NVS_SEARCH, MIMI_NVS_KEY_API_KEY,  MIMI_SECRET_SEARCH_KEY, true);
+    printf("=============================\n");
+    return 0;
+}
+
+/* --- config_reset command --- */
+static int cmd_config_reset(int argc, char **argv)
+{
+    const char *namespaces[] = {
+        MIMI_NVS_WIFI, MIMI_NVS_TG, MIMI_NVS_LLM, MIMI_NVS_PROXY, MIMI_NVS_SEARCH
+    };
+    for (int i = 0; i < 5; i++) {
+        nvs_handle_t nvs;
+        if (nvs_open(namespaces[i], NVS_READWRITE, &nvs) == ESP_OK) {
+            nvs_erase_all(nvs);
+            nvs_commit(nvs);
+            nvs_close(nvs);
+        }
+    }
+    printf("All NVS config cleared. Build-time defaults will be used on restart.\n");
+    return 0;
+}
+
 /* --- restart command --- */
 static int cmd_restart(int argc, char **argv)
 {
@@ -120,6 +310,19 @@ esp_err_t serial_cli_init(void)
     ESP_ERROR_CHECK(esp_console_new_repl_usb_serial_jtag(&hw_config, &repl_config, &repl));
 
     /* Register commands */
+    esp_console_register_help_command();
+
+    /* wifi_set */
+    wifi_set_args.ssid = arg_str1(NULL, NULL, "<ssid>", "WiFi SSID");
+    wifi_set_args.password = arg_str1(NULL, NULL, "<password>", "WiFi password");
+    wifi_set_args.end = arg_end(2);
+    esp_console_cmd_t wifi_set_cmd = {
+        .command = "wifi_set",
+        .help = "Set WiFi SSID and password",
+        .func = &cmd_wifi_set,
+        .argtable = &wifi_set_args,
+    };
+    esp_console_cmd_register(&wifi_set_cmd);
 
     /* wifi_status */
     esp_console_cmd_t wifi_status_cmd = {
@@ -128,6 +331,39 @@ esp_err_t serial_cli_init(void)
         .func = &cmd_wifi_status,
     };
     esp_console_cmd_register(&wifi_status_cmd);
+
+    /* set_tg_token */
+    tg_token_args.token = arg_str1(NULL, NULL, "<token>", "Telegram bot token");
+    tg_token_args.end = arg_end(1);
+    esp_console_cmd_t tg_token_cmd = {
+        .command = "set_tg_token",
+        .help = "Set Telegram bot token",
+        .func = &cmd_set_tg_token,
+        .argtable = &tg_token_args,
+    };
+    esp_console_cmd_register(&tg_token_cmd);
+
+    /* set_api_key */
+    api_key_args.key = arg_str1(NULL, NULL, "<key>", "Anthropic API key");
+    api_key_args.end = arg_end(1);
+    esp_console_cmd_t api_key_cmd = {
+        .command = "set_api_key",
+        .help = "Set Claude API key",
+        .func = &cmd_set_api_key,
+        .argtable = &api_key_args,
+    };
+    esp_console_cmd_register(&api_key_cmd);
+
+    /* set_model */
+    model_args.model = arg_str1(NULL, NULL, "<model>", "Model identifier");
+    model_args.end = arg_end(1);
+    esp_console_cmd_t model_cmd = {
+        .command = "set_model",
+        .help = "Set LLM model (default: " MIMI_LLM_DEFAULT_MODEL ")",
+        .func = &cmd_set_model,
+        .argtable = &model_args,
+    };
+    esp_console_cmd_register(&model_cmd);
 
     /* memory_read */
     esp_console_cmd_t mem_read_cmd = {
@@ -174,6 +410,53 @@ esp_err_t serial_cli_init(void)
         .func = &cmd_heap_info,
     };
     esp_console_cmd_register(&heap_cmd);
+
+    /* set_search_key */
+    search_key_args.key = arg_str1(NULL, NULL, "<key>", "Brave Search API key");
+    search_key_args.end = arg_end(1);
+    esp_console_cmd_t search_key_cmd = {
+        .command = "set_search_key",
+        .help = "Set Brave Search API key for web_search tool",
+        .func = &cmd_set_search_key,
+        .argtable = &search_key_args,
+    };
+    esp_console_cmd_register(&search_key_cmd);
+
+    /* set_proxy */
+    proxy_args.host = arg_str1(NULL, NULL, "<host>", "Proxy host/IP");
+    proxy_args.port = arg_int1(NULL, NULL, "<port>", "Proxy port");
+    proxy_args.end = arg_end(2);
+    esp_console_cmd_t proxy_cmd = {
+        .command = "set_proxy",
+        .help = "Set HTTP proxy (e.g. set_proxy 192.168.1.83 7897)",
+        .func = &cmd_set_proxy,
+        .argtable = &proxy_args,
+    };
+    esp_console_cmd_register(&proxy_cmd);
+
+    /* clear_proxy */
+    esp_console_cmd_t clear_proxy_cmd = {
+        .command = "clear_proxy",
+        .help = "Remove proxy configuration",
+        .func = &cmd_clear_proxy,
+    };
+    esp_console_cmd_register(&clear_proxy_cmd);
+
+    /* config_show */
+    esp_console_cmd_t config_show_cmd = {
+        .command = "config_show",
+        .help = "Show current configuration (build-time + NVS)",
+        .func = &cmd_config_show,
+    };
+    esp_console_cmd_register(&config_show_cmd);
+
+    /* config_reset */
+    esp_console_cmd_t config_reset_cmd = {
+        .command = "config_reset",
+        .help = "Clear all NVS overrides, revert to build-time defaults",
+        .func = &cmd_config_reset,
+    };
+    esp_console_cmd_register(&config_reset_cmd);
 
     /* restart */
     esp_console_cmd_t restart_cmd = {

@@ -71,7 +71,7 @@ idf.py set-target esp32s3
 
 ### 配置
 
-所有配置通过 `mimi_secrets.h` 在编译时写入：
+MimiClaw 使用**两层配置**：`mimi_secrets.h` 提供编译时默认值，串口 CLI 可在运行时覆盖。CLI 设置的值存在 NVS Flash 中，优先级高于编译时值。
 
 ```bash
 cp main/mimi_secrets.h.example main/mimi_secrets.h
@@ -110,13 +110,34 @@ idf.py -p PORT flash monitor
 
 **前提**：局域网内有一个支持 HTTP CONNECT 的代理（Clash Verge、V2Ray 等），并开启了「允许局域网连接」。
 
-在 `mimi_secrets.h` 中设置 `MIMI_SECRET_PROXY_HOST` 和 `MIMI_SECRET_PROXY_PORT`。清除代理只需把这两项改回空字符串 `""`，然后重新编译。
+可以在 `mimi_secrets.h` 中编译时设置，也可以通过串口 CLI 随时修改：
+
+```
+mimi> set_proxy 192.168.1.83 7897   # 设置代理
+mimi> clear_proxy                    # 清除代理
+```
 
 > **提示**：确保 ESP32-S3 和代理机器在同一局域网。Clash Verge 在「设置 → 允许局域网」中开启。
 
 ### CLI 命令
 
-串口 CLI 提供调试和运维命令：
+通过串口连接即可配置和调试。**配置命令**让你无需重新编译就能修改设置 — 随时随地插上 USB 线就能改。
+
+**运行时配置**（存入 NVS，覆盖编译时默认值）：
+
+```
+mimi> wifi_set MySSID MyPassword   # 换 WiFi
+mimi> set_tg_token 123456:ABC...   # 换 Telegram Bot Token
+mimi> set_api_key sk-ant-api03-... # 换 Anthropic API Key
+mimi> set_model claude-sonnet-4-5-20250929  # 换模型
+mimi> set_proxy 192.168.1.83 7897  # 设置代理
+mimi> clear_proxy                  # 清除代理
+mimi> set_search_key BSA...        # 设置 Brave Search API Key
+mimi> config_show                  # 查看所有配置（脱敏显示）
+mimi> config_reset                 # 清除 NVS，恢复编译时默认值
+```
+
+**调试与运维：**
 
 ```
 mimi> wifi_status              # 连上了吗？

@@ -8,6 +8,7 @@
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
+#include "nvs.h"
 #include "cJSON.h"
 
 static const char *TAG = "llm";
@@ -70,6 +71,7 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 
 esp_err_t llm_proxy_init(void)
 {
+    /* Start with build-time defaults */
     if (MIMI_SECRET_API_KEY[0] != '\0') {
         strncpy(s_api_key, MIMI_SECRET_API_KEY, sizeof(s_api_key) - 1);
     }
@@ -77,10 +79,26 @@ esp_err_t llm_proxy_init(void)
         strncpy(s_model, MIMI_SECRET_MODEL, sizeof(s_model) - 1);
     }
 
+    /* NVS overrides take highest priority (set via CLI) */
+    nvs_handle_t nvs;
+    if (nvs_open(MIMI_NVS_LLM, NVS_READONLY, &nvs) == ESP_OK) {
+        char tmp[128] = {0};
+        size_t len = sizeof(tmp);
+        if (nvs_get_str(nvs, MIMI_NVS_KEY_API_KEY, tmp, &len) == ESP_OK && tmp[0]) {
+            strncpy(s_api_key, tmp, sizeof(s_api_key) - 1);
+        }
+        len = sizeof(tmp);
+        memset(tmp, 0, sizeof(tmp));
+        if (nvs_get_str(nvs, MIMI_NVS_KEY_MODEL, tmp, &len) == ESP_OK && tmp[0]) {
+            strncpy(s_model, tmp, sizeof(s_model) - 1);
+        }
+        nvs_close(nvs);
+    }
+
     if (s_api_key[0]) {
         ESP_LOGI(TAG, "LLM proxy initialized (model: %s)", s_model);
     } else {
-        ESP_LOGW(TAG, "No API key. Set MIMI_SECRET_API_KEY in mimi_secrets.h");
+        ESP_LOGW(TAG, "No API key. Use CLI: set_api_key <KEY>");
     }
     return ESP_OK;
 }
@@ -448,3 +466,30 @@ esp_err_t llm_chat_tools(const char *system_prompt,
     return ESP_OK;
 }
 
+/* ── NVS helpers ──────────────────────────────────────────────── */
+
+esp_err_t llm_set_api_key(const char *api_key)
+{
+    nvs_handle_t nvs;
+    ESP_ERROR_CHECK(nvs_open(MIMI_NVS_LLM, NVS_READWRITE, &nvs));
+    ESP_ERROR_CHECK(nvs_set_str(nvs, MIMI_NVS_KEY_API_KEY, api_key));
+    ESP_ERROR_CHECK(nvs_commit(nvs));
+    nvs_close(nvs);
+
+    strncpy(s_api_key, api_key, sizeof(s_api_key) - 1);
+    ESP_LOGI(TAG, "API key saved");
+    return ESP_OK;
+}
+
+esp_err_t llm_set_model(const char *model)
+{
+    nvs_handle_t nvs;
+    ESP_ERROR_CHECK(nvs_open(MIMI_NVS_LLM, NVS_READWRITE, &nvs));
+    ESP_ERROR_CHECK(nvs_set_str(nvs, MIMI_NVS_KEY_MODEL, model));
+    ESP_ERROR_CHECK(nvs_commit(nvs));
+    nvs_close(nvs);
+
+    strncpy(s_model, model, sizeof(s_model) - 1);
+    ESP_LOGI(TAG, "Model set to: %s", s_model);
+    return ESP_OK;
+}

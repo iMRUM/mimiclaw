@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
+#include "nvs.h"
 #include "cJSON.h"
 
 static const char *TAG = "telegram";
@@ -256,10 +257,23 @@ static void telegram_poll_task(void *arg)
 
 esp_err_t telegram_bot_init(void)
 {
+    /* NVS overrides take highest priority (set via CLI) */
+    nvs_handle_t nvs;
+    if (nvs_open(MIMI_NVS_TG, NVS_READONLY, &nvs) == ESP_OK) {
+        char tmp[128] = {0};
+        size_t len = sizeof(tmp);
+        if (nvs_get_str(nvs, MIMI_NVS_KEY_TG_TOKEN, tmp, &len) == ESP_OK && tmp[0]) {
+            strncpy(s_bot_token, tmp, sizeof(s_bot_token) - 1);
+        }
+        nvs_close(nvs);
+    }
+
+    /* s_bot_token is already initialized from MIMI_SECRET_TG_TOKEN as fallback */
+
     if (s_bot_token[0]) {
         ESP_LOGI(TAG, "Telegram bot token loaded (len=%d)", (int)strlen(s_bot_token));
     } else {
-        ESP_LOGW(TAG, "No Telegram bot token. Set MIMI_SECRET_TG_TOKEN in mimi_secrets.h");
+        ESP_LOGW(TAG, "No Telegram bot token. Use CLI: set_tg_token <TOKEN>");
     }
     return ESP_OK;
 }
@@ -357,3 +371,15 @@ esp_err_t telegram_send_message(const char *chat_id, const char *text)
     return ESP_OK;
 }
 
+esp_err_t telegram_set_token(const char *token)
+{
+    nvs_handle_t nvs;
+    ESP_ERROR_CHECK(nvs_open(MIMI_NVS_TG, NVS_READWRITE, &nvs));
+    ESP_ERROR_CHECK(nvs_set_str(nvs, MIMI_NVS_KEY_TG_TOKEN, token));
+    ESP_ERROR_CHECK(nvs_commit(nvs));
+    nvs_close(nvs);
+
+    strncpy(s_bot_token, token, sizeof(s_bot_token) - 1);
+    ESP_LOGI(TAG, "Telegram bot token saved");
+    return ESP_OK;
+}

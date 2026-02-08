@@ -104,9 +104,9 @@
 - **MimiClaw**: Not implemented
 - **Recommendation**: Requires extra HTTPS request to Whisper API: download Telegram voice -> forward -> get text
 
-### [x] ~~Build-time Config File~~
-- Implemented: `mimi_secrets.h` — sole configuration method (build-time only, no NVS/CLI)
-- Replaces need for YAML config; suitable for MCU workflow
+### [x] ~~Build-time Config File + Runtime NVS Override~~
+- Implemented: `mimi_secrets.h` as build-time defaults, NVS as runtime override via CLI
+- Two-layer config: build-time secrets → NVS fallback, CLI commands to set/show/reset
 
 ### [ ] WebSocket Gateway Protocol Enhancement
 - **nanobot**: Gateway port 18790 + richer protocol
@@ -149,7 +149,7 @@
 - [x] OTA Update
 - [x] WiFi Manager (build-time credentials, exponential backoff)
 - [x] SPIFFS storage
-- [x] Build-time config (`mimi_secrets.h`, sole configuration method)
+- [x] Build-time config (`mimi_secrets.h`) + runtime NVS override via CLI
 
 ---
 

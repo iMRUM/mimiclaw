@@ -20,3 +20,8 @@ esp_err_t telegram_bot_start(void);
  */
 esp_err_t telegram_send_message(const char *chat_id, const char *text);
 
+/**
+ * Save the Telegram bot token to NVS.
+ */
+esp_err_t telegram_set_token(const char *token);
+

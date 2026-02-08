@@ -36,6 +36,11 @@ bool wifi_manager_is_connected(void);
 const char *wifi_manager_get_ip(void);
 
 /**
+ * Save WiFi credentials to NVS.
+ */
+esp_err_t wifi_manager_set_credentials(const char *ssid, const char *password);
+
+/**
  * Get the event group for WiFi state (WIFI_CONNECTED_BIT / WIFI_FAIL_BIT).
  */
 EventGroupHandle_t wifi_manager_get_event_group(void);

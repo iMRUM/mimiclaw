@@ -71,7 +71,7 @@ idf.py set-target esp32s3
 
 ### Configure
 
-All configuration is done through `mimi_secrets.h` at build time:
+MimiClaw uses a **two-layer config** system: build-time defaults in `mimi_secrets.h`, with runtime overrides via the serial CLI. CLI values are stored in NVS flash and take priority over build-time values.
 
 ```bash
 cp main/mimi_secrets.h.example main/mimi_secrets.h
@@ -106,7 +106,23 @@ idf.py -p PORT flash monitor
 
 ### CLI Commands
 
-The serial CLI provides debug and maintenance commands:
+Connect via serial to configure or debug. **Config commands** let you change settings without recompiling — just plug in a USB cable anywhere.
+
+**Runtime config** (saved to NVS, overrides build-time defaults):
+
+```
+mimi> wifi_set MySSID MyPassword   # change WiFi network
+mimi> set_tg_token 123456:ABC...   # change Telegram bot token
+mimi> set_api_key sk-ant-api03-... # change Anthropic API key
+mimi> set_model claude-sonnet-4-5  # change LLM model
+mimi> set_proxy 127.0.0.1 7897  # set HTTP proxy
+mimi> clear_proxy                  # remove proxy
+mimi> set_search_key BSA...        # set Brave Search API key
+mimi> config_show                  # show all config (masked)
+mimi> config_reset                 # clear NVS, revert to build-time defaults
+```
+
+**Debug & maintenance:**
 
 ```
 mimi> wifi_status              # am I connected?

@@ -2,7 +2,7 @@
 
 /* MimiClaw Global Configuration */
 
-/* Build-time secrets (sole configuration method) */
+/* Build-time secrets (highest priority, override NVS) */
 #if __has_include("mimi_secrets.h")
 #include "mimi_secrets.h"
 #endif
@@ -87,4 +87,20 @@
 #define MIMI_CLI_STACK               (4 * 1024)
 #define MIMI_CLI_PRIO                3
 #define MIMI_CLI_CORE                0
+
+/* NVS Namespaces */
+#define MIMI_NVS_WIFI                "wifi_config"
+#define MIMI_NVS_TG                  "tg_config"
+#define MIMI_NVS_LLM                 "llm_config"
+#define MIMI_NVS_PROXY               "proxy_config"
+#define MIMI_NVS_SEARCH              "search_config"
+
+/* NVS Keys */
+#define MIMI_NVS_KEY_SSID            "ssid"
+#define MIMI_NVS_KEY_PASS            "password"
+#define MIMI_NVS_KEY_TG_TOKEN        "bot_token"
+#define MIMI_NVS_KEY_API_KEY         "api_key"
+#define MIMI_NVS_KEY_MODEL           "model"
+#define MIMI_NVS_KEY_PROXY_HOST      "host"
+#define MIMI_NVS_KEY_PROXY_PORT      "port"
 
