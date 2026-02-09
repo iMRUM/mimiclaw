@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include "esp_log.h"
 #include "cJSON.h"
+#include <stdbool.h>
 
 static const char *TAG = "tool_files";
 
